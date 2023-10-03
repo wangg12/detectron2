@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+# Copyright (c) Facebook, Inc. and its affiliates.
 
 import glob
 import os
@@ -63,7 +63,7 @@ setup(
     version="0.1",
     author="FAIR",
     packages=find_packages(exclude=("configs", "tests")),
-    python_requires=">=3.6",
+    python_requires=">=3.7",
     ext_modules=get_extensions(),
     cmdclass={"build_ext": torch.utils.cpp_extension.BuildExtension},
 )

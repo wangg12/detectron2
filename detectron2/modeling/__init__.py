@@ -1,4 +1,4 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+# Copyright (c) Facebook, Inc. and its affiliates.
 from detectron2.layers import ShapeSpec
 
 from .anchor_generator import build_anchor_generator, ANCHOR_GENERATOR_REGISTRY
@@ -11,6 +11,11 @@ from .backbone import (
     build_backbone,
     build_resnet_backbone,
     make_stage,
+    ViT,
+    SimpleFeaturePyramid,
+    get_vit_lr_decay_rate,
+    MViT,
+    SwinTransformer,
 )
 from .meta_arch import (
     META_ARCH_REGISTRY,
@@ -22,6 +27,7 @@ from .meta_arch import (
     SemanticSegmentor,
     build_model,
     build_sem_seg_head,
+    FCOS,
 )
 from .postprocessing import detector_postprocess
 from .proposal_generator import (
@@ -39,12 +45,20 @@ from .roi_heads import (
     StandardROIHeads,
     BaseMaskRCNNHead,
     BaseKeypointRCNNHead,
+    FastRCNNOutputLayers,
     build_box_head,
     build_keypoint_head,
     build_mask_head,
     build_roi_heads,
 )
 from .test_time_augmentation import DatasetMapperTTA, GeneralizedRCNNWithTTA
+from .mmdet_wrapper import MMDetBackbone, MMDetDetector
 
 _EXCLUDE = {"ShapeSpec"}
 __all__ = [k for k in globals().keys() if k not in _EXCLUDE and not k.startswith("_")]
+
+
+from detectron2.utils.env import fixup_module_metadata
+
+fixup_module_metadata(__name__, globals(), __all__)
+del fixup_module_metadata

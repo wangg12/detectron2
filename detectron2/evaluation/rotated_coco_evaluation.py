@@ -1,13 +1,13 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+# Copyright (c) Facebook, Inc. and its affiliates.
 import itertools
 import json
 import numpy as np
 import os
 import torch
-from fvcore.common.file_io import PathManager
 from pycocotools.cocoeval import COCOeval, maskUtils
 
 from detectron2.structures import BoxMode, RotatedBoxes, pairwise_iou_rotated
+from detectron2.utils.file_io import PathManager
 
 from .coco_evaluation import COCOEvaluator
 
@@ -65,7 +65,7 @@ class RotatedCOCOeval(COCOeval):
             # This is the same as the classical COCO evaluation
             return maskUtils.iou(dt, gt, is_crowd)
 
-    def computeIoU(self, imgId, catId):
+    def computeIoU(self, imgId: int, catId: int):
         p = self.params
         if p.useCats:
             gt = self._gts[imgId, catId]
@@ -73,8 +73,10 @@ class RotatedCOCOeval(COCOeval):
         else:
             gt = [_ for cId in p.catIds for _ in self._gts[imgId, cId]]
             dt = [_ for cId in p.catIds for _ in self._dts[imgId, cId]]
-        if len(gt) == 0 and len(dt) == 0:
+
+        if len(gt) == 0 or len(dt) == 0:
             return []
+
         inds = np.argsort([-d["score"] for d in dt], kind="mergesort")
         dt = [dt[i] for i in inds]
         if len(dt) > p.maxDets[-1]:
@@ -145,7 +147,7 @@ class RotatedCOCOEvaluator(COCOEvaluator):
             results.append(result)
         return results
 
-    def _eval_predictions(self, tasks, predictions):
+    def _eval_predictions(self, predictions, img_ids=None):  # img_ids: unused
         """
         Evaluate predictions on the given tasks.
         Fill self._results with the metrics of the tasks.
@@ -173,18 +175,21 @@ class RotatedCOCOEvaluator(COCOEvaluator):
             return
 
         self._logger.info("Evaluating predictions ...")
-        for task in sorted(tasks):
-            assert task == "bbox", "Task {} is not supported".format(task)
-            coco_eval = (
-                self._evaluate_predictions_on_coco(self._coco_api, coco_results)
-                if len(coco_results) > 0
-                else None  # cocoapi does not handle empty results very well
-            )
 
-            res = self._derive_coco_results(
-                coco_eval, task, class_names=self._metadata.get("thing_classes")
-            )
-            self._results[task] = res
+        assert self._tasks is None or set(self._tasks) == {
+            "bbox"
+        }, "[RotatedCOCOEvaluator] Only bbox evaluation is supported"
+        coco_eval = (
+            self._evaluate_predictions_on_coco(self._coco_api, coco_results)
+            if len(coco_results) > 0
+            else None  # cocoapi does not handle empty results very well
+        )
+
+        task = "bbox"
+        res = self._derive_coco_results(
+            coco_eval, task, class_names=self._metadata.get("thing_classes")
+        )
+        self._results[task] = res
 
     def _evaluate_predictions_on_coco(self, coco_gt, coco_results):
         """

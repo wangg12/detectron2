@@ -10,9 +10,11 @@ Tutorials
    extend
    datasets
    data_loading
+   augmentation
    models
    write-models
    training
    evaluation
    configs
+   lazyconfigs
    deployment

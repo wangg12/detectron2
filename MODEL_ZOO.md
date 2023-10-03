@@ -5,21 +5,21 @@
 This file documents a large collection of baselines trained
 with detectron2 in Sep-Oct, 2019.
 All numbers were obtained on [Big Basin](https://engineering.fb.com/data-center-engineering/introducing-big-basin-our-next-generation-ai-hardware/)
-servers with 8 NVIDIA V100 GPUs & NVLink. The software in use were PyTorch 1.3, CUDA 9.2, cuDNN 7.4.2 or 7.6.3.
+servers with 8 NVIDIA V100 GPUs & NVLink. The speed numbers are periodically updated with latest PyTorch/CUDA/cuDNN versions.
 You can access these models from code using [detectron2.model_zoo](https://detectron2.readthedocs.io/modules/model_zoo.html) APIs.
 
 In addition to these official baseline models, you can find more models in [projects/](projects/).
 
 #### How to Read the Tables
-* The "Name" column contains a link to the config file. Running `tools/train_net.py` with this config file
-	and 8 GPUs will reproduce the model.
+* The "Name" column contains a link to the config file. Models can be reproduced using `tools/train_net.py` with the corresponding yaml config file,
+  or `tools/lazyconfig_train_net.py` for python config files.
 * Training speed is averaged across the entire training.
-	We keep updating the speed with latest version of detectron2/pytorch/etc.,
-	so they might be different from the `metrics` file.
-	Training speed for multi-machine jobs is not provided.
+  We keep updating the speed with latest version of detectron2/pytorch/etc.,
+  so they might be different from the `metrics` file.
+  Training speed for multi-machine jobs is not provided.
 * Inference speed is measured by `tools/train_net.py --eval-only`, or [inference_on_dataset()](https://detectron2.readthedocs.io/modules/evaluation.html#detectron2.evaluation.inference_on_dataset),
   with batch size 1 in detectron2 directly.
-	Measuring it with custom code may introduce other overhead.
+  Measuring it with custom code may introduce other overhead.
   Actual deployment in production should in general be faster than the given inference
   speed due to more optimizations.
 * The *model id* column is provided for ease of reference.
@@ -49,12 +49,15 @@ In addition to these official baseline models, you can find more models in [proj
 
 #### ImageNet Pretrained Models
 
-We provide backbone models pretrained on ImageNet-1k dataset.
-These models have __different__ format from those provided in Detectron: we do not fuse BatchNorm into an affine layer.
+It's common to initialize from backbone models pre-trained on ImageNet classification tasks. The following backbone models are available:
+
 * [R-50.pkl](https://dl.fbaipublicfiles.com/detectron2/ImageNetPretrained/MSRA/R-50.pkl): converted copy of [MSRA's original ResNet-50](https://github.com/KaimingHe/deep-residual-networks) model.
 * [R-101.pkl](https://dl.fbaipublicfiles.com/detectron2/ImageNetPretrained/MSRA/R-101.pkl): converted copy of [MSRA's original ResNet-101](https://github.com/KaimingHe/deep-residual-networks) model.
 * [X-101-32x8d.pkl](https://dl.fbaipublicfiles.com/detectron2/ImageNetPretrained/FAIR/X-101-32x8d.pkl): ResNeXt-101-32x8d model trained with Caffe2 at FB.
+* [R-50.pkl (torchvision)](https://dl.fbaipublicfiles.com/detectron2/ImageNetPretrained/torchvision/R-50.pkl): converted copy of [torchvision's ResNet-50](https://pytorch.org/docs/stable/torchvision/models.html#torchvision.models.resnet50) model.
+  More details can be found in [the conversion script](tools/convert-torchvision-to-d2.py).
 
+Note that the above models have __different__ format from those provided in Detectron: we do not fuse BatchNorm into an affine layer.
 Pretrained models in Detectron's format can still be used. For example:
 * [X-152-32x8d-IN5k.pkl](https://dl.fbaipublicfiles.com/detectron/ImageNetPretrained/25093814/X-152-32x8d-IN5k.pkl):
   ResNeXt-152-32x8d model trained on ImageNet-5k with Caffe2 at FB (see ResNeXt paper for details on ImageNet-5k).
@@ -63,7 +66,7 @@ Pretrained models in Detectron's format can still be used. For example:
 * [R-101-GN.pkl](https://dl.fbaipublicfiles.com/detectron/ImageNetPretrained/47592356/R-101-GN.pkl):
   ResNet-101 with Group Normalization.
 
-Torchvision's ResNet models can be used after converted by [this script](tools/convert-torchvision-to-d2.py).
+These models require slightly different settings regarding normalization and architecture. See the model zoo configs for reference.
 
 #### License
 
@@ -218,7 +221,7 @@ All models available for download through this document are licensed under the
  <tr><td align="left"><a href="configs/COCO-Detection/retinanet_R_50_FPN_1x.yaml">R50</a></td>
 <td align="center">1x</td>
 <td align="center">0.205</td>
-<td align="center">0.056</td>
+<td align="center">0.041</td>
 <td align="center">4.1</td>
 <td align="center">37.4</td>
 <td align="center">190397773</td>
@@ -228,7 +231,7 @@ All models available for download through this document are licensed under the
  <tr><td align="left"><a href="configs/COCO-Detection/retinanet_R_50_FPN_3x.yaml">R50</a></td>
 <td align="center">3x</td>
 <td align="center">0.205</td>
-<td align="center">0.056</td>
+<td align="center">0.041</td>
 <td align="center">4.1</td>
 <td align="center">38.7</td>
 <td align="center">190397829</td>
@@ -238,7 +241,7 @@ All models available for download through this document are licensed under the
  <tr><td align="left"><a href="configs/COCO-Detection/retinanet_R_101_FPN_3x.yaml">R101</a></td>
 <td align="center">3x</td>
 <td align="center">0.291</td>
-<td align="center">0.069</td>
+<td align="center">0.054</td>
 <td align="center">5.2</td>
 <td align="center">40.4</td>
 <td align="center">190397697</td>
@@ -432,6 +435,152 @@ All models available for download through this document are licensed under the
 </tr>
 </tbody></table>
 
+
+
+#### New baselines using Large-Scale Jitter and Longer Training Schedule
+
+The following baselines of COCO Instance Segmentation with Mask R-CNN are generated
+using a longer training schedule and large-scale jitter as described in Google's
+[Simple Copy-Paste Data Augmentation](https://arxiv.org/pdf/2012.07177.pdf) paper. These
+models are trained from scratch using random initialization. These baselines exceed the
+previous Mask R-CNN baselines.
+
+In the following table, one epoch consists of training on 118000 COCO images.
+
+<table><tbody>
+<!-- START TABLE -->
+<!-- TABLE HEADER -->
+<th valign="bottom">Name</th>
+<th valign="bottom">epochs</th>
+<th valign="bottom">train<br/>time<br/>(s/im)</th>
+<th valign="bottom">inference<br/>time<br/>(s/im)</th>
+<th valign="bottom">box<br/>AP</th>
+<th valign="bottom">mask<br/>AP</th>
+<th valign="bottom">model id</th>
+<th valign="bottom">download</th>
+<!-- TABLE BODY -->
+<!-- ROW: mask_rcnn_R_50_FPN_100ep_LSJ -->
+ <tr><td align="left"><a href="configs/new_baselines/mask_rcnn_R_50_FPN_100ep_LSJ.py">R50-FPN</a></td>
+<td align="center">100</td>
+<td align="center">0.376</td>
+<td align="center">0.069</td>
+<td align="center">44.6</td>
+<td align="center">40.3</td>
+<td align="center">42047764</td>
+<td align="center"><a href="https://dl.fbaipublicfiles.com/detectron2/new_baselines/mask_rcnn_R_50_FPN_100ep_LSJ/42047764/model_final_bb69de.pkl">model</a>&nbsp;|&nbsp;<a href="https://dl.fbaipublicfiles.com/detectron2/new_baselines/mask_rcnn_R_50_FPN_100ep_LSJ/42047764/metrics.json">metrics</a></td>
+</tr>
+<!-- ROW: mask_rcnn_R_50_FPN_200ep_LSJ -->
+ <tr><td align="left"><a href="configs/new_baselines/mask_rcnn_R_50_FPN_200ep_LSJ.py">R50-FPN</a></td>
+<td align="center">200</td>
+<td align="center">0.376</td>
+<td align="center">0.069</td>
+<td align="center">46.3</td>
+<td align="center">41.7</td>
+<td align="center">42047638</td>
+<td align="center"><a href="https://dl.fbaipublicfiles.com/detectron2/new_baselines/mask_rcnn_R_50_FPN_200ep_LSJ/42047638/model_final_89a8d3.pkl">model</a>&nbsp;|&nbsp;<a href="https://dl.fbaipublicfiles.com/detectron2/new_baselines/mask_rcnn_R_50_FPN_200ep_LSJ/42047638/metrics.json">metrics</a></td>
+</tr>
+<!-- ROW: mask_rcnn_R_50_FPN_400ep_LSJ -->
+ <tr><td align="left"><a href="configs/new_baselines/mask_rcnn_R_50_FPN_400ep_LSJ.py">R50-FPN</a></td>
+<td align="center">400</td>
+<td align="center">0.376</td>
+<td align="center">0.069</td>
+<td align="center">47.4</td>
+<td align="center">42.5</td>
+<td align="center">42019571</td>
+<td align="center"><a href="https://dl.fbaipublicfiles.com/detectron2/new_baselines/mask_rcnn_R_50_FPN_400ep_LSJ/42019571/model_final_14d201.pkl">model</a>&nbsp;|&nbsp;<a href="https://dl.fbaipublicfiles.com/detectron2/new_baselines/mask_rcnn_R_50_FPN_400ep_LSJ/42019571/metrics.json">metrics</a></td>
+</tr>
+<!-- ROW: mask_rcnn_R_101_FPN_100ep_LSJ -->
+ <tr><td align="left"><a href="configs/new_baselines/mask_rcnn_R_101_FPN_100ep_LSJ.py">R101-FPN</a></td>
+<td align="center">100</td>
+<td align="center">0.518</td>
+<td align="center">0.073</td>
+<td align="center">46.4</td>
+<td align="center">41.6</td>
+<td align="center">42025812</td>
+<td align="center"><a href="https://dl.fbaipublicfiles.com/detectron2/new_baselines/mask_rcnn_R_101_FPN_100ep_LSJ/42025812/model_final_4f7b58.pkl">model</a>&nbsp;|&nbsp;<a href="https://dl.fbaipublicfiles.com/detectron2/new_baselines/mask_rcnn_R_101_FPN_100ep_LSJ/42025812/metrics.json">metrics</a></td>
+</tr>
+<!-- ROW: mask_rcnn_R_101_FPN_200ep_LSJ -->
+ <tr><td align="left"><a href="configs/new_baselines/mask_rcnn_R_101_FPN_200ep_LSJ.py">R101-FPN</a></td>
+<td align="center">200</td>
+<td align="center">0.518</td>
+<td align="center">0.073</td>
+<td align="center">48.0</td>
+<td align="center">43.1</td>
+<td align="center">42131867</td>
+<td align="center"><a href="https://dl.fbaipublicfiles.com/detectron2/new_baselines/mask_rcnn_R_101_FPN_200ep_LSJ/42131867/model_final_0bb7ae.pkl">model</a>&nbsp;|&nbsp;<a href="https://dl.fbaipublicfiles.com/detectron2/new_baselines/mask_rcnn_R_101_FPN_200ep_LSJ/42131867/metrics.json">metrics</a></td>
+</tr>
+<!-- ROW: mask_rcnn_R_101_FPN_400ep_LSJ -->
+ <tr><td align="left"><a href="configs/new_baselines/mask_rcnn_R_101_FPN_400ep_LSJ.py">R101-FPN</a></td>
+<td align="center">400</td>
+<td align="center">0.518</td>
+<td align="center">0.073</td>
+<td align="center">48.9</td>
+<td align="center">43.7</td>
+<td align="center">42073830</td>
+<td align="center"><a href="https://dl.fbaipublicfiles.com/detectron2/new_baselines/mask_rcnn_R_101_FPN_400ep_LSJ/42073830/model_final_f96b26.pkl">model</a>&nbsp;|&nbsp;<a href="https://dl.fbaipublicfiles.com/detectron2/new_baselines/mask_rcnn_R_101_FPN_400ep_LSJ/42073830/metrics.json">metrics</a></td>
+</tr>
+<!-- ROW: mask_rcnn_regnetx_4gf_dds_FPN_100ep_LSJ -->
+ <tr><td align="left"><a href="configs/new_baselines/mask_rcnn_regnetx_4gf_dds_FPN_100ep_LSJ.py">regnetx_4gf_dds_FPN</a></td>
+<td align="center">100</td>
+<td align="center">0.474</td>
+<td align="center">0.071</td>
+<td align="center">46.0</td>
+<td align="center">41.3</td>
+<td align="center">42047771</td>
+<td align="center"><a href="https://dl.fbaipublicfiles.com/detectron2/new_baselines/mask_rcnn_regnetx_4gf_dds_FPN_100ep_LSJ/42047771/model_final_b7fbab.pkl">model</a>&nbsp;|&nbsp;<a href="https://dl.fbaipublicfiles.com/detectron2/new_baselines/mask_rcnn_regnetx_4gf_dds_FPN_100ep_LSJ/42047771/metrics.json">metrics</a></td>
+</tr>
+<!-- ROW: mask_rcnn_regnetx_4gf_dds_FPN_200ep_LSJ -->
+ <tr><td align="left"><a href="configs/new_baselines/mask_rcnn_regnetx_4gf_dds_FPN_200ep_LSJ.py">regnetx_4gf_dds_FPN</a></td>
+<td align="center">200</td>
+<td align="center">0.474</td>
+<td align="center">0.071</td>
+<td align="center">48.1</td>
+<td align="center">43.1</td>
+<td align="center">42132721</td>
+<td align="center"><a href="https://dl.fbaipublicfiles.com/detectron2/new_baselines/mask_rcnn_regnetx_4gf_dds_FPN_200ep_LSJ/42132721/model_final_5d87c1.pkl">model</a>&nbsp;|&nbsp;<a href="https://dl.fbaipublicfiles.com/detectron2/new_baselines/mask_rcnn_regnetx_4gf_dds_FPN_200ep_LSJ/42132721/metrics.json">metrics</a></td>
+</tr>
+<!-- ROW: mask_rcnn_regnetx_4gf_dds_FPN_400ep_LSJ -->
+ <tr><td align="left"><a href="configs/new_baselines/mask_rcnn_regnetx_4gf_dds_FPN_400ep_LSJ.py">regnetx_4gf_dds_FPN</a></td>
+<td align="center">400</td>
+<td align="center">0.474</td>
+<td align="center">0.071</td>
+<td align="center">48.6</td>
+<td align="center">43.5</td>
+<td align="center">42025447</td>
+<td align="center"><a href="https://dl.fbaipublicfiles.com/detectron2/new_baselines/mask_rcnn_regnetx_4gf_dds_FPN_400ep_LSJ/42025447/model_final_f1362d.pkl">model</a>&nbsp;|&nbsp;<a href="https://dl.fbaipublicfiles.com/detectron2/new_baselines/mask_rcnn_regnetx_4gf_dds_FPN_400ep_LSJ/42025447/metrics.json">metrics</a></td>
+</tr>
+<!-- ROW: mask_rcnn_regnety_4gf_dds_FPN_100ep_LSJ -->
+ <tr><td align="left"><a href="configs/new_baselines/mask_rcnn_regnety_4gf_dds_FPN_100ep_LSJ.py">regnety_4gf_dds_FPN</a></td>
+<td align="center">100</td>
+<td align="center">0.487</td>
+<td align="center">0.073</td>
+<td align="center">46.1</td>
+<td align="center">41.6</td>
+<td align="center">42047784</td>
+<td align="center"><a href="https://dl.fbaipublicfiles.com/detectron2/new_baselines/mask_rcnn_regnety_4gf_dds_FPN_100ep_LSJ/42047784/model_final_6ba57e.pkl">model</a>&nbsp;|&nbsp;<a href="https://dl.fbaipublicfiles.com/detectron2/new_baselines/mask_rcnn_regnety_4gf_dds_FPN_100ep_LSJ/42047784/metrics.json">metrics</a></td>
+</tr>
+<!-- ROW: mask_rcnn_regnety_4gf_dds_FPN_200ep_LSJ -->
+ <tr><td align="left"><a href="configs/new_baselines/mask_rcnn_regnety_4gf_dds_FPN_200ep_LSJ.py">regnety_4gf_dds_FPN</a></td>
+<td align="center">200</td>
+<td align="center">0.487</td>
+<td align="center">0.072</td>
+<td align="center">47.8</td>
+<td align="center">43.0</td>
+<td align="center">42047642</td>
+<td align="center"><a href="https://dl.fbaipublicfiles.com/detectron2/new_baselines/mask_rcnn_regnety_4gf_dds_FPN_200ep_LSJ/42047642/model_final_27b9c1.pkl">model</a>&nbsp;|&nbsp;<a href="https://dl.fbaipublicfiles.com/detectron2/new_baselines/mask_rcnn_regnety_4gf_dds_FPN_200ep_LSJ/42047642/metrics.json">metrics</a></td>
+</tr>
+<!-- ROW: mask_rcnn_regnety_4gf_dds_FPN_400ep_LSJ -->
+ <tr><td align="left"><a href="configs/new_baselines/mask_rcnn_regnety_4gf_dds_FPN_400ep_LSJ.py">regnety_4gf_dds_FPN</a></td>
+<td align="center">400</td>
+<td align="center">0.487</td>
+<td align="center">0.072</td>
+<td align="center">48.2</td>
+<td align="center">43.3</td>
+<td align="center">42045954</td>
+<td align="center"><a href="https://dl.fbaipublicfiles.com/detectron2/new_baselines/mask_rcnn_regnety_4gf_dds_FPN_400ep_LSJ/42045954/model_final_ef3a80.pkl">model</a>&nbsp;|&nbsp;<a href="https://dl.fbaipublicfiles.com/detectron2/new_baselines/mask_rcnn_regnety_4gf_dds_FPN_400ep_LSJ/42045954/metrics.json">metrics</a></td>
+</tr>
+</tbody></table>
+
 ### COCO Person Keypoint Detection Baselines with Keypoint R-CNN
 <!--
 ./gen_html_table.py --config 'COCO-Keypoints/*50*' 'COCO-Keypoints/*101*'  --name R50-FPN R50-FPN R101-FPN X101-FPN --fields lr_sched train_speed inference_speed mem box_AP keypoint_AP
@@ -566,7 +715,7 @@ They are roughly 24 epochs of LVISv0.5 data.
 The final results of these configs have large variance across different runs.
 
 <!--
-./gen_html_table.py --config 'LVIS-InstanceSegmentation/mask*50*' 'LVIS-InstanceSegmentation/mask*101*' --name R50-FPN R101-FPN X101-FPN --fields lr_sched train_speed inference_speed mem box_AP mask_AP
+./gen_html_table.py --config 'LVISv0.5-InstanceSegmentation/mask*50*' 'LVISv0.5-InstanceSegmentation/mask*101*' --name R50-FPN R101-FPN X101-FPN --fields lr_sched train_speed inference_speed mem box_AP mask_AP
 -->
 
 
@@ -584,7 +733,7 @@ The final results of these configs have large variance across different runs.
 <th valign="bottom">download</th>
 <!-- TABLE BODY -->
 <!-- ROW: mask_rcnn_R_50_FPN_1x -->
- <tr><td align="left"><a href="configs/LVIS-InstanceSegmentation/mask_rcnn_R_50_FPN_1x.yaml">R50-FPN</a></td>
+ <tr><td align="left"><a href="configs/LVISv0.5-InstanceSegmentation/mask_rcnn_R_50_FPN_1x.yaml">R50-FPN</a></td>
 <td align="center">1x</td>
 <td align="center">0.292</td>
 <td align="center">0.107</td>
@@ -592,10 +741,10 @@ The final results of these configs have large variance across different runs.
 <td align="center">23.6</td>
 <td align="center">24.4</td>
 <td align="center">144219072</td>
-<td align="center"><a href="https://dl.fbaipublicfiles.com/detectron2/LVIS-InstanceSegmentation/mask_rcnn_R_50_FPN_1x/144219072/model_final_571f7c.pkl">model</a>&nbsp;|&nbsp;<a href="https://dl.fbaipublicfiles.com/detectron2/LVIS-InstanceSegmentation/mask_rcnn_R_50_FPN_1x/144219072/metrics.json">metrics</a></td>
+<td align="center"><a href="https://dl.fbaipublicfiles.com/detectron2/LVISv0.5-InstanceSegmentation/mask_rcnn_R_50_FPN_1x/144219072/model_final_571f7c.pkl">model</a>&nbsp;|&nbsp;<a href="https://dl.fbaipublicfiles.com/detectron2/LVISv0.5-InstanceSegmentation/mask_rcnn_R_50_FPN_1x/144219072/metrics.json">metrics</a></td>
 </tr>
 <!-- ROW: mask_rcnn_R_101_FPN_1x -->
- <tr><td align="left"><a href="configs/LVIS-InstanceSegmentation/mask_rcnn_R_101_FPN_1x.yaml">R101-FPN</a></td>
+ <tr><td align="left"><a href="configs/LVISv0.5-InstanceSegmentation/mask_rcnn_R_101_FPN_1x.yaml">R101-FPN</a></td>
 <td align="center">1x</td>
 <td align="center">0.371</td>
 <td align="center">0.114</td>
@@ -603,10 +752,10 @@ The final results of these configs have large variance across different runs.
 <td align="center">25.6</td>
 <td align="center">25.9</td>
 <td align="center">144219035</td>
-<td align="center"><a href="https://dl.fbaipublicfiles.com/detectron2/LVIS-InstanceSegmentation/mask_rcnn_R_101_FPN_1x/144219035/model_final_824ab5.pkl">model</a>&nbsp;|&nbsp;<a href="https://dl.fbaipublicfiles.com/detectron2/LVIS-InstanceSegmentation/mask_rcnn_R_101_FPN_1x/144219035/metrics.json">metrics</a></td>
+<td align="center"><a href="https://dl.fbaipublicfiles.com/detectron2/LVISv0.5-InstanceSegmentation/mask_rcnn_R_101_FPN_1x/144219035/model_final_824ab5.pkl">model</a>&nbsp;|&nbsp;<a href="https://dl.fbaipublicfiles.com/detectron2/LVISv0.5-InstanceSegmentation/mask_rcnn_R_101_FPN_1x/144219035/metrics.json">metrics</a></td>
 </tr>
 <!-- ROW: mask_rcnn_X_101_32x8d_FPN_1x -->
- <tr><td align="left"><a href="configs/LVIS-InstanceSegmentation/mask_rcnn_X_101_32x8d_FPN_1x.yaml">X101-FPN</a></td>
+ <tr><td align="left"><a href="configs/LVISv0.5-InstanceSegmentation/mask_rcnn_X_101_32x8d_FPN_1x.yaml">X101-FPN</a></td>
 <td align="center">1x</td>
 <td align="center">0.712</td>
 <td align="center">0.151</td>
@@ -614,7 +763,7 @@ The final results of these configs have large variance across different runs.
 <td align="center">26.7</td>
 <td align="center">27.1</td>
 <td align="center">144219108</td>
-<td align="center"><a href="https://dl.fbaipublicfiles.com/detectron2/LVIS-InstanceSegmentation/mask_rcnn_X_101_32x8d_FPN_1x/144219108/model_final_5e3439.pkl">model</a>&nbsp;|&nbsp;<a href="https://dl.fbaipublicfiles.com/detectron2/LVIS-InstanceSegmentation/mask_rcnn_X_101_32x8d_FPN_1x/144219108/metrics.json">metrics</a></td>
+<td align="center"><a href="https://dl.fbaipublicfiles.com/detectron2/LVISv0.5-InstanceSegmentation/mask_rcnn_X_101_32x8d_FPN_1x/144219108/model_final_5e3439.pkl">model</a>&nbsp;|&nbsp;<a href="https://dl.fbaipublicfiles.com/detectron2/LVISv0.5-InstanceSegmentation/mask_rcnn_X_101_32x8d_FPN_1x/144219108/metrics.json">metrics</a></td>
 </tr>
 </tbody></table>
 

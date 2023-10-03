@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+# Copyright (c) Facebook, Inc. and its affiliates.
 
 # flake8: noqa
 
@@ -17,7 +17,7 @@
 #
 import os
 import sys
-import mock
+from unittest import mock
 from sphinx.domains import Domain
 from typing import Dict, List, Tuple
 
@@ -33,7 +33,7 @@ class GithubURLDomain(Domain):
     """
 
     name = "githuburl"
-    ROOT = "https://github.com/facebookresearch/detectron2/blob/master/"
+    ROOT = "https://github.com/facebookresearch/detectron2/blob/main/"
     LINKED_DOC = ["tutorials/install", "tutorials/getting_started"]
 
     def resolve_any_xref(self, env, fromdocname, builder, target, node, contnode):
@@ -61,7 +61,7 @@ class GithubURLDomain(Domain):
 from recommonmark.parser import CommonMarkParser
 
 sys.path.insert(0, os.path.abspath("../"))
-os.environ["DOC_BUILDING"] = "True"
+os.environ["_DOC_BUILDING"] = "True"
 DEPLOY = os.environ.get("READTHEDOCS") == "True"
 
 
@@ -77,7 +77,14 @@ except ImportError:
         "torchvision", "torchvision.ops",
     ]:
         sys.modules[m] = mock.Mock(name=m)
-    sys.modules['torch'].__version__ = "1.5"  # fake version
+    sys.modules['torch'].__version__ = "1.7"  # fake version
+    HAS_TORCH = False
+else:
+    try:
+        torch.ops.detectron2 = mock.Mock(name="torch.ops.detectron2")
+    except:
+        pass
+    HAS_TORCH = True
 
 for m in [
     "cv2", "scipy", "portalocker", "detectron2._C",
@@ -90,6 +97,12 @@ for m in [
 sys.modules["cv2"].__version__ = "3.4"
 
 import detectron2  # isort: skip
+
+if HAS_TORCH:
+    from detectron2.utils.env import fixup_module_metadata
+
+    fixup_module_metadata("torch.nn", torch.nn.__dict__)
+    fixup_module_metadata("torch.utils.data", torch.utils.data.__dict__)
 
 
 project = "detectron2"
@@ -136,9 +149,9 @@ if DEPLOY:
     intersphinx_timeout = 10
 else:
     # skip this when building locally
-    intersphinx_timeout = 0.1
+    intersphinx_timeout = 0.5
 intersphinx_mapping = {
-    "python": ("https://docs.python.org/3.6", None),
+    "python": ("https://docs.python.org/3.7", None),
     "numpy": ("https://docs.scipy.org/doc/numpy/", None),
     "torch": ("https://pytorch.org/docs/master/", None),
 }
@@ -270,9 +283,21 @@ def autodoc_skip_member(app, what, name, obj, skip, options):
         "GroupedBatchSampler",
         "build_transform_gen",
         "apply_transform_gens",
+        "TransformGen",
+        "apply_augmentations",
+        "StandardAugInput",
+        "build_batch_data_loader",
+        "draw_panoptic_seg_predictions",
+        "WarmupCosineLR",
+        "WarmupMultiStepLR",
+        "downgrade_config",
+        "upgrade_config",
+        "add_export_config",
     }
     try:
-        if obj.__doc__.lower().strip().startswith("deprecated") or name in HIDDEN:
+        if name in HIDDEN or (
+            hasattr(obj, "__doc__") and obj.__doc__.lower().strip().startswith("deprecated")
+        ):
             print("Skipping deprecated object: {}".format(name))
             return True
     except:
@@ -296,6 +321,32 @@ _PAPER_DATA = {
     "lvis": ("1908.03195", "LVIS: A Dataset for Large Vocabulary Instance Segmentation"),
     "rrpn": ("1703.01086", "Arbitrary-Oriented Scene Text Detection via Rotation Proposals"),
     "imagenet in 1h": ("1706.02677", "Accurate, Large Minibatch SGD: Training ImageNet in 1 Hour"),
+    "xception": ("1610.02357", "Xception: Deep Learning with Depthwise Separable Convolutions"),
+    "mobilenet": (
+        "1704.04861",
+        "MobileNets: Efficient Convolutional Neural Networks for Mobile Vision Applications",
+    ),
+    "deeplabv3+": (
+        "1802.02611",
+        "Encoder-Decoder with Atrous Separable Convolution for Semantic Image Segmentation",
+    ),
+    "dds": ("2003.13678", "Designing Network Design Spaces"),
+    "scaling": ("2103.06877", "Fast and Accurate Model Scaling"),
+    "fcos": ("2006.09214", "FCOS: A Simple and Strong Anchor-free Object Detector"),
+    "rethinking-batchnorm": ("2105.07576", 'Rethinking "Batch" in BatchNorm'),
+    "vitdet": ("2203.16527", "Exploring Plain Vision Transformer Backbones for Object Detection"),
+    "mvitv2": (
+        "2112.01526",
+        "MViTv2: Improved Multiscale Vision Transformers for Classification and Detection",
+    ),
+    "swin": (
+        "2103.14030",
+        "Swin Transformer: Hierarchical Vision Transformer using Shifted Windows",
+    ),
+    "omni3d": (
+        "2207.10660",
+        "Omni3D: A Large Benchmark and Model for 3D Object Detection in the Wild",
+    ),
 }
 
 

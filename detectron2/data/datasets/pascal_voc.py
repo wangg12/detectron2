@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+# Copyright (c) Facebook, Inc. and its affiliates.
 
 import numpy as np
 import os
 import xml.etree.ElementTree as ET
 from typing import List, Tuple, Union
-from fvcore.common.file_io import PathManager
 
 from detectron2.data import DatasetCatalog, MetadataCatalog
 from detectron2.structures import BoxMode
+from detectron2.utils.file_io import PathManager
 
 __all__ = ["load_voc_instances", "register_pascal_voc"]
 
@@ -32,7 +32,7 @@ def load_voc_instances(dirname: str, split: str, class_names: Union[List[str], T
         class_names: list or tuple of class names
     """
     with PathManager.open(os.path.join(dirname, "ImageSets", "Main", split + ".txt")) as f:
-        fileids = np.loadtxt(f, dtype=np.str)
+        fileids = np.loadtxt(f, dtype=str)
 
     # Needs to read many small annotation files. Makes sense at local
     annotation_dirname = PathManager.get_local_path(os.path.join(dirname, "Annotations/"))

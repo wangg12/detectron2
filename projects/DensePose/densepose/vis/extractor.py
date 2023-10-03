@@ -1,17 +1,24 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+# Copyright (c) Facebook, Inc. and its affiliates.
 import logging
-from typing import Sequence
+from typing import List, Optional, Sequence, Tuple
 import torch
 
 from detectron2.layers.nms import batched_nms
 from detectron2.structures.instances import Instances
 
+from densepose.converters import ToChartResultConverterWithConfidences
+from densepose.structures import (
+    DensePoseChartResultWithConfidences,
+    DensePoseEmbeddingPredictorOutput,
+)
 from densepose.vis.bounding_box import BoundingBoxVisualizer, ScoredBoundingBoxVisualizer
-from densepose.vis.densepose import DensePoseResultsVisualizer
+from densepose.vis.densepose_outputs_vertex import DensePoseOutputsVertexVisualizer
+from densepose.vis.densepose_results import DensePoseResultsVisualizer
 
 from .base import CompoundVisualizer
 
 Scores = Sequence[float]
+DensePoseChartResultsWithConfidences = List[DensePoseChartResultWithConfidences]
 
 
 def extract_scores_from_instances(instances: Instances, select=None):
@@ -42,13 +49,15 @@ def create_extractor(visualizer: object):
         return CompoundExtractor([extract_boxes_xywh_from_instances, extract_scores_from_instances])
     elif isinstance(visualizer, BoundingBoxVisualizer):
         return extract_boxes_xywh_from_instances
+    elif isinstance(visualizer, DensePoseOutputsVertexVisualizer):
+        return DensePoseOutputsExtractor()
     else:
         logger = logging.getLogger(__name__)
         logger.error(f"Could not create extractor for {visualizer}")
         return None
 
 
-class BoundingBoxExtractor(object):
+class BoundingBoxExtractor:
     """
     Extracts bounding boxes from instances
     """
@@ -58,7 +67,7 @@ class BoundingBoxExtractor(object):
         return boxes_xywh
 
 
-class ScoredBoundingBoxExtractor(object):
+class ScoredBoundingBoxExtractor:
     """
     Extracts bounding boxes from instances
     """
@@ -74,24 +83,62 @@ class ScoredBoundingBoxExtractor(object):
         return (boxes_xywh, scores)
 
 
-class DensePoseResultExtractor(object):
+class DensePoseResultExtractor:
+    """
+    Extracts DensePose chart result with confidences from instances
+    """
+
+    def __call__(
+        self, instances: Instances, select=None
+    ) -> Tuple[Optional[DensePoseChartResultsWithConfidences], Optional[torch.Tensor]]:
+        if instances.has("pred_densepose") and instances.has("pred_boxes"):
+            dpout = instances.pred_densepose
+            boxes_xyxy = instances.pred_boxes
+            boxes_xywh = extract_boxes_xywh_from_instances(instances)
+            if select is not None:
+                dpout = dpout[select]
+                boxes_xyxy = boxes_xyxy[select]
+            converter = ToChartResultConverterWithConfidences()
+            results = [converter.convert(dpout[i], boxes_xyxy[[i]]) for i in range(len(dpout))]
+            return results, boxes_xywh
+        else:
+            return None, None
+
+
+class DensePoseOutputsExtractor:
     """
     Extracts DensePose result from instances
     """
 
-    def __call__(self, instances: Instances, select=None):
+    def __call__(
+        self,
+        instances: Instances,
+        select=None,
+    ) -> Tuple[
+        Optional[DensePoseEmbeddingPredictorOutput], Optional[torch.Tensor], Optional[List[int]]
+    ]:
+        if not (instances.has("pred_densepose") and instances.has("pred_boxes")):
+            return None, None, None
+
+        dpout = instances.pred_densepose
+        boxes_xyxy = instances.pred_boxes
         boxes_xywh = extract_boxes_xywh_from_instances(instances)
-        if instances.has("pred_densepose") and (boxes_xywh is not None):
-            dpout = instances.pred_densepose
-            if select is not None:
-                dpout = dpout[select]
-                boxes_xywh = boxes_xywh[select]
-            return dpout.to_result(boxes_xywh)
+
+        if instances.has("pred_classes"):
+            classes = instances.pred_classes.tolist()
         else:
-            return None
+            classes = None
+
+        if select is not None:
+            dpout = dpout[select]
+            boxes_xyxy = boxes_xyxy[select]
+            if classes is not None:
+                classes = classes[select]
+
+        return dpout, boxes_xywh, classes
 
 
-class CompoundExtractor(object):
+class CompoundExtractor:
     """
     Extracts data for CompoundVisualizer
     """
@@ -107,7 +154,7 @@ class CompoundExtractor(object):
         return datas
 
 
-class NmsFilteredExtractor(object):
+class NmsFilteredExtractor:
     """
     Extracts data in the format accepted by NmsFilteredVisualizer
     """
@@ -133,7 +180,7 @@ class NmsFilteredExtractor(object):
         return self.extractor(instances, select=select)
 
 
-class ScoreThresholdedExtractor(object):
+class ScoreThresholdedExtractor:
     """
     Extracts data in the format accepted by ScoreThresholdedVisualizer
     """

@@ -1,18 +1,31 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
+# Copyright (c) Facebook, Inc. and its affiliates.
 import math
-import sys
-from typing import List
+from typing import List, Optional
 import torch
 from torch import nn
 from torchvision.ops import RoIPool
 
-from detectron2.layers import ROIAlign, ROIAlignRotated, cat, nonzero_tuple
+from detectron2.layers import ROIAlign, ROIAlignRotated, cat, nonzero_tuple, shapes_to_tensor
+from detectron2.structures import Boxes
+from detectron2.utils.tracing import assert_fx_safe, is_fx_tracing
+
+"""
+To export ROIPooler to torchscript, in this file, variables that should be annotated with
+`Union[List[Boxes], List[RotatedBoxes]]` are only annotated with `List[Boxes]`.
+
+TODO: Correct these annotations when torchscript support `Union`.
+https://github.com/pytorch/pytorch/issues/41412
+"""
 
 __all__ = ["ROIPooler"]
 
 
 def assign_boxes_to_levels(
-    box_lists, min_level: int, max_level: int, canonical_box_size: int, canonical_level: int
+    box_lists: List[Boxes],
+    min_level: int,
+    max_level: int,
+    canonical_box_size: int,
+    canonical_level: int,
 ):
     """
     Map each box in `box_lists` to a feature map level index and return the assignment
@@ -35,11 +48,10 @@ def assign_boxes_to_levels(
             `self.min_level`, for the corresponding box (so value i means the box is at
             `self.min_level + i`).
     """
-    eps = sys.float_info.epsilon
     box_sizes = torch.sqrt(cat([boxes.area() for boxes in box_lists]))
     # Eqn.(1) in FPN paper
     level_assignments = torch.floor(
-        canonical_level + torch.log2(box_sizes / canonical_box_size + eps)
+        canonical_level + torch.log2(box_sizes / canonical_box_size + 1e-8)
     )
     # clamp level to (min, max), in case the box size is too large or too small
     # for the available feature maps
@@ -47,7 +59,17 @@ def assign_boxes_to_levels(
     return level_assignments.to(torch.int64) - min_level
 
 
-def convert_boxes_to_pooler_format(box_lists):
+# script the module to avoid hardcoded device type
+@torch.jit.script_if_tracing
+def _convert_boxes_to_pooler_format(boxes: torch.Tensor, sizes: torch.Tensor) -> torch.Tensor:
+    sizes = sizes.to(device=boxes.device)
+    indices = torch.repeat_interleave(
+        torch.arange(len(sizes), dtype=boxes.dtype, device=boxes.device), sizes
+    )
+    return cat([indices[:, None], boxes], dim=1)
+
+
+def convert_boxes_to_pooler_format(box_lists: List[Boxes]):
     """
     Convert all boxes in `box_lists` to the low-level format used by ROI pooling ops
     (see description under Returns).
@@ -70,18 +92,23 @@ def convert_boxes_to_pooler_format(box_lists):
             where batch index is the index in [0, N) identifying which batch image the
             rotated box (x_ctr, y_ctr, width, height, angle_degrees) comes from.
     """
+    boxes = torch.cat([x.tensor for x in box_lists], dim=0)
+    # __len__ returns Tensor in tracing.
+    sizes = shapes_to_tensor([x.__len__() for x in box_lists])
+    return _convert_boxes_to_pooler_format(boxes, sizes)
 
-    def fmt_box_list(box_tensor, batch_index):
-        repeated_index = torch.full(
-            (len(box_tensor), 1), batch_index, dtype=box_tensor.dtype, device=box_tensor.device
-        )
-        return cat((repeated_index, box_tensor), dim=1)
 
-    pooler_fmt_boxes = cat(
-        [fmt_box_list(box_list.tensor, i) for i, box_list in enumerate(box_lists)], dim=0
-    )
-
-    return pooler_fmt_boxes
+@torch.jit.script_if_tracing
+def _create_zeros(
+    batch_target: Optional[torch.Tensor],
+    channels: int,
+    height: int,
+    width: int,
+    like_tensor: torch.Tensor,
+) -> torch.Tensor:
+    batches = batch_target.shape[0] if batch_target is not None else 0
+    sizes = (batches, channels, height, width)
+    return torch.zeros(sizes, dtype=like_tensor.dtype, device=like_tensor.device)
 
 
 class ROIPooler(nn.Module):
@@ -105,7 +132,7 @@ class ROIPooler(nn.Module):
                 e.g., 14 x 14. If tuple or list is given, the length must be 2.
             scales (list[float]): The scale for each low-level pooling op relative to
                 the input image. For a feature map with stride s relative to the input
-                image, scale is defined as a 1 / s. The stride must be power of 2.
+                image, scale is defined as 1/s. The stride must be power of 2.
                 When there are multiple scales, they must form a pyramid, i.e. they must be
                 a monotically decreasing geometric sequence with a factor of 1/2.
             sampling_ratio (int): The `sampling_ratio` parameter for the ROIAlign op.
@@ -171,12 +198,12 @@ class ROIPooler(nn.Module):
         assert (
             len(scales) == self.max_level - self.min_level + 1
         ), "[ROIPooler] Sizes of input featuremaps do not form a pyramid!"
-        assert 0 < self.min_level and self.min_level <= self.max_level
+        assert 0 <= self.min_level and self.min_level <= self.max_level
         self.canonical_level = canonical_level
         assert canonical_box_size > 0
         self.canonical_box_size = canonical_box_size
 
-    def forward(self, x: List[torch.Tensor], box_lists):
+    def forward(self, x: List[torch.Tensor], box_lists: List[Boxes]):
         """
         Args:
             x (list[Tensor]): A list of feature maps of NCHW shape, with scales matching those
@@ -193,20 +220,25 @@ class ROIPooler(nn.Module):
         """
         num_level_assignments = len(self.level_poolers)
 
-        assert isinstance(x, list) and isinstance(
-            box_lists, list
-        ), "Arguments to pooler must be lists"
-        assert (
-            len(x) == num_level_assignments
-        ), "unequal value, num_level_assignments={}, but x is list of {} Tensors".format(
-            num_level_assignments, len(x)
+        if not is_fx_tracing():
+            torch._assert(
+                isinstance(x, list) and isinstance(box_lists, list),
+                "Arguments to pooler must be lists",
+            )
+        assert_fx_safe(
+            len(x) == num_level_assignments,
+            "unequal value, num_level_assignments={}, but x is list of {} Tensors".format(
+                num_level_assignments, len(x)
+            ),
         )
-
-        assert len(box_lists) == x[0].size(
-            0
-        ), "unequal value, x[0] batch dim 0 is {}, but box_list has length {}".format(
-            x[0].size(0), len(box_lists)
+        assert_fx_safe(
+            len(box_lists) == x[0].size(0),
+            "unequal value, x[0] batch dim 0 is {}, but box_list has length {}".format(
+                x[0].size(0), len(box_lists)
+            ),
         )
+        if len(box_lists) == 0:
+            return _create_zeros(None, x[0].shape[1], *self.output_size, x[0])
 
         pooler_fmt_boxes = convert_boxes_to_pooler_format(box_lists)
 
@@ -217,18 +249,15 @@ class ROIPooler(nn.Module):
             box_lists, self.min_level, self.max_level, self.canonical_box_size, self.canonical_level
         )
 
-        num_boxes = len(pooler_fmt_boxes)
         num_channels = x[0].shape[1]
         output_size = self.output_size[0]
 
-        dtype, device = x[0].dtype, x[0].device
-        output = torch.zeros(
-            (num_boxes, num_channels, output_size, output_size), dtype=dtype, device=device
-        )
+        output = _create_zeros(pooler_fmt_boxes, num_channels, output_size, output_size, x[0])
 
-        for level, (x_level, pooler) in enumerate(zip(x, self.level_poolers)):
+        for level, pooler in enumerate(self.level_poolers):
             inds = nonzero_tuple(level_assignments == level)[0]
             pooler_fmt_boxes_level = pooler_fmt_boxes[inds]
-            output[inds] = pooler(x_level, pooler_fmt_boxes_level)
+            # Use index_put_ instead of advance indexing, to avoid pytorch/issues/49852
+            output.index_put_((inds,), pooler(x[level], pooler_fmt_boxes_level))
 
         return output

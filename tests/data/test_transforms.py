@@ -1,10 +1,13 @@
 # -*- coding: utf-8 -*-
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+# Copyright (c) Facebook, Inc. and its affiliates.
 
 import logging
 import numpy as np
 import unittest
 from unittest import mock
+import torch
+from PIL import Image, ImageOps
+from torch.nn import functional as F
 
 from detectron2.config import get_cfg
 from detectron2.data import detection_utils
@@ -12,6 +15,19 @@ from detectron2.data import transforms as T
 from detectron2.utils.logger import setup_logger
 
 logger = logging.getLogger(__name__)
+
+
+def polygon_allclose(poly1, poly2):
+    """
+    Test whether two polygons are the same.
+    Both arguments are nx2 numpy arrays.
+    """
+    # ABCD and CDAB are the same polygon. So it's important to check after rolling
+    for k in range(len(poly1)):
+        rolled_poly1 = np.roll(poly1, k, axis=0)
+        if np.allclose(rolled_poly1, poly2):
+            return True
+    return False
 
 
 class TestTransforms(unittest.TestCase):
@@ -35,6 +51,45 @@ class TestTransforms(unittest.TestCase):
         expected_bbox = np.array([484, 388, 248, 160, 56], dtype=np.float64)
         err_msg = "transformed_bbox = {}, expected {}".format(transformed_bbox, expected_bbox)
         assert np.allclose(transformed_bbox, expected_bbox), err_msg
+
+    def test_resize_and_crop(self):
+        np.random.seed(125)
+        min_scale = 0.2
+        max_scale = 2.0
+        target_height = 1100
+        target_width = 1000
+        resize_aug = T.ResizeScale(min_scale, max_scale, target_height, target_width)
+        fixed_size_crop_aug = T.FixedSizeCrop((target_height, target_width))
+        hflip_aug = T.RandomFlip()
+        augs = [resize_aug, fixed_size_crop_aug, hflip_aug]
+        original_image = np.random.rand(900, 800)
+        image, transforms = T.apply_augmentations(augs, original_image)
+        image_shape = image.shape[:2]  # h, w
+        self.assertEqual((1100, 1000), image_shape)
+
+        boxes = np.array(
+            [[91, 46, 144, 111], [523, 251, 614, 295]],
+            dtype=np.float64,
+        )
+        transformed_bboxs = transforms.apply_box(boxes)
+        expected_bboxs = np.array(
+            [
+                [895.42, 33.42666667, 933.91125, 80.66],
+                [554.0825, 182.39333333, 620.17125, 214.36666667],
+            ],
+            dtype=np.float64,
+        )
+        err_msg = "transformed_bbox = {}, expected {}".format(transformed_bboxs, expected_bboxs)
+        self.assertTrue(np.allclose(transformed_bboxs, expected_bboxs), err_msg)
+
+        polygon = np.array([[91, 46], [144, 46], [144, 111], [91, 111]])
+        transformed_polygons = transforms.apply_polygons([polygon])
+        expected_polygon = np.array([[934.0, 33.0], [934.0, 80.0], [896.0, 80.0], [896.0, 33.0]])
+        self.assertEqual(1, len(transformed_polygons))
+        err_msg = "transformed_polygon = {}, expected {}".format(
+            transformed_polygons[0], expected_polygon
+        )
+        self.assertTrue(polygon_allclose(transformed_polygons[0], expected_polygon), err_msg)
 
     def test_apply_rotated_boxes_unequal_scaling_factor(self):
         np.random.seed(125)
@@ -72,13 +127,16 @@ class TestTransforms(unittest.TestCase):
 
     def test_print_augmentation(self):
         t = T.RandomCrop("relative", (100, 100))
-        self.assertTrue(str(t) == "RandomCrop(crop_type='relative', crop_size=(100, 100))")
+        self.assertEqual(str(t), "RandomCrop(crop_type='relative', crop_size=(100, 100))")
 
-        t = T.RandomFlip(prob=0.5)
-        self.assertTrue(str(t) == "RandomFlip(prob=0.5)")
+        t0 = T.RandomFlip(prob=0.5)
+        self.assertEqual(str(t0), "RandomFlip(prob=0.5)")
 
-        t = T.RandomFlip()
-        self.assertTrue(str(t) == "RandomFlip()")
+        t1 = T.RandomFlip()
+        self.assertEqual(str(t1), "RandomFlip()")
+
+        t = T.AugmentationList([t0, t1])
+        self.assertEqual(str(t), f"AugmentationList[{t0}, {t1}]")
 
     def test_random_apply_prob_out_of_range_check(self):
         test_probabilities = {0.0: True, 0.5: True, 1.0: True, -0.01: False, 1.01: False}
@@ -124,8 +182,6 @@ class TestTransforms(unittest.TestCase):
 
         # define two augmentations with different args
         class TG1(T.Augmentation):
-            input_args = ("image", "sem_seg")
-
             def get_transform(self, image, sem_seg):
                 return T.ResizeTransform(
                     input_shape[0], input_shape[1], output_shape[0], output_shape[1]
@@ -138,7 +194,7 @@ class TestTransforms(unittest.TestCase):
 
         image = np.random.rand(*input_shape).astype("float32")
         sem_seg = (np.random.rand(*input_shape) < 0.5).astype("uint8")
-        inputs = T.StandardAugInput(image, sem_seg=sem_seg)  # provide two args
+        inputs = T.AugInput(image, sem_seg=sem_seg)  # provide two args
         tfms = inputs.apply_augmentations([TG1(), TG2()])
         self.assertIsInstance(tfms[0], T.ResizeTransform)
         self.assertIsInstance(tfms[1], T.HFlipTransform)
@@ -146,10 +202,67 @@ class TestTransforms(unittest.TestCase):
         self.assertTrue(inputs.sem_seg.shape[:2] == output_shape)
 
         class TG3(T.Augmentation):
-            input_args = ("image", "nonexist")
-
             def get_transform(self, image, nonexist):
                 pass
 
         with self.assertRaises(AttributeError):
             inputs.apply_augmentations([TG3()])
+
+    def test_augmentation_list(self):
+        input_shape = (100, 100)
+        image = np.random.rand(*input_shape).astype("float32")
+        sem_seg = (np.random.rand(*input_shape) < 0.5).astype("uint8")
+        inputs = T.AugInput(image, sem_seg=sem_seg)  # provide two args
+
+        augs = T.AugmentationList([T.RandomFlip(), T.Resize(20)])
+        _ = T.AugmentationList([augs, T.Resize(30)])(inputs)
+        # 3 in latest fvcore (flattened transformlist), 2 in older
+        # self.assertEqual(len(tfms), 3)
+
+    def test_color_transforms(self):
+        rand_img = np.random.random((100, 100, 3)) * 255
+        rand_img = rand_img.astype("uint8")
+
+        # Test no-op
+        noop_transform = T.ColorTransform(lambda img: img)
+        self.assertTrue(np.array_equal(rand_img, noop_transform.apply_image(rand_img)))
+
+        # Test a ImageOps operation
+        magnitude = np.random.randint(0, 256)
+        solarize_transform = T.PILColorTransform(lambda img: ImageOps.solarize(img, magnitude))
+        expected_img = ImageOps.solarize(Image.fromarray(rand_img), magnitude)
+        self.assertTrue(np.array_equal(expected_img, solarize_transform.apply_image(rand_img)))
+
+    def test_resize_transform(self):
+        input_shapes = [(100, 100), (100, 100, 1), (100, 100, 3)]
+        output_shapes = [(200, 200), (200, 200, 1), (200, 200, 3)]
+        for in_shape, out_shape in zip(input_shapes, output_shapes):
+            in_img = np.random.randint(0, 255, size=in_shape, dtype=np.uint8)
+            tfm = T.ResizeTransform(in_shape[0], in_shape[1], out_shape[0], out_shape[1])
+            out_img = tfm.apply_image(in_img)
+            self.assertEqual(out_img.shape, out_shape)
+
+    def test_resize_shorted_edge_scriptable(self):
+        def f(image):
+            newh, neww = T.ResizeShortestEdge.get_output_shape(
+                image.shape[-2], image.shape[-1], 80, 133
+            )
+            return F.interpolate(image.unsqueeze(0), size=(newh, neww))
+
+        input = torch.randn(3, 10, 10)
+        script_f = torch.jit.script(f)
+        self.assertTrue(torch.allclose(f(input), script_f(input)))
+
+        # generalize to new shapes
+        input = torch.randn(3, 8, 100)
+        self.assertTrue(torch.allclose(f(input), script_f(input)))
+
+    def test_extent_transform(self):
+        input_shapes = [(100, 100), (100, 100, 1), (100, 100, 3)]
+        src_rect = (20, 20, 80, 80)
+        output_shapes = [(200, 200), (200, 200, 1), (200, 200, 3)]
+        for in_shape, out_shape in zip(input_shapes, output_shapes):
+            in_img = np.random.randint(0, 255, size=in_shape, dtype=np.uint8)
+            tfm = T.ExtentTransform(src_rect, out_shape[:2])
+            out_img = tfm.apply_image(in_img)
+            self.assertTrue(out_img.shape == out_shape)

@@ -1,25 +1,21 @@
 #!/bin/bash -e
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+# Copyright (c) Facebook, Inc. and its affiliates.
 
-# Run this script at project root by "./dev/linter.sh" before you commit
-
-vergte() {
-  [ "$2" = "$(echo -e "$1\\n$2" | sort -V | head -n1)" ]
-}
+# cd to detectron2 project root
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 {
-  black --version | grep -E "(19.3b0.*6733274)|(19.3b0\\+8)" > /dev/null
+  black --version | grep -E "22\." > /dev/null
 } || {
-	echo "Linter requires 'black @ git+https://github.com/psf/black@673327449f86fce558adde153bb6cbe54bfebad2' !"
-	exit 1
-}
-
-ISORT_TARGET_VERSION="4.3.21"
-ISORT_VERSION=$(isort -v | grep VERSION | awk '{print $2}')
-vergte "$ISORT_VERSION" "$ISORT_TARGET_VERSION" || {
-  echo "Linter requires isort>=${ISORT_TARGET_VERSION} !"
+  echo "Linter requires 'black==22.*' !"
   exit 1
 }
+
+ISORT_VERSION=$(isort --version-number)
+if [[ "$ISORT_VERSION" != 4.3* ]]; then
+  echo "Linter requires isort==4.3.21 !"
+  exit 1
+fi
 
 set -v
 
@@ -30,8 +26,8 @@ echo "Running black ..."
 black -l 100 .
 
 echo "Running flake8 ..."
-if [ -x "$(command -v flake8-3)" ]; then
-  flake8-3 .
+if [ -x "$(command -v flake8)" ]; then
+  flake8 .
 else
   python3 -m flake8 .
 fi
